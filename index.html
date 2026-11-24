@@ -412,5 +412,132 @@ setTimeout(function(){ t.classList.remove('on'); }, 5000);
 setTimeout(function(){ toast(); setInterval(toast, 9000); }, 3500);
 })();
 </script>
+<!--
+  SCRIPT DE REPASSE DE UTM — Instituto Souto
+  Cole este bloco antes do </body> de cada página (ou no campo
+  "Scripts do rodapé / Custom code" do construtor de páginas).
+
+  O que ele faz:
+  1. Lê as UTMs (e fbclid, gclid, src, sck) da URL de entrada.
+  2. Guarda por 30 dias no navegador, para o visitante não perder a origem
+     se navegar por outras páginas do site.
+  3. Acrescenta esses parâmetros em todos os links da página (checkout da
+     Hubla, outras páginas etc.), inclusive em botões que aparecem depois.
+  4. Preenche campos ocultos de formulários com o mesmo nome (ex.: utm_source).
+  5. Nunca sobrescreve um parâmetro que o link já tenha.
+-->
+<script>
+(function () {
+  // ===== CONFIGURAÇÃO =====
+  var PARAMETROS = [
+    'utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'utm_id',
+    'fbclid', 'gclid', 'src', 'sck'
+  ];
+  var DIAS_GUARDADOS = 30;
+  // Domínios em que NÃO colocar UTM (deixe vazio [] para colocar em todos)
+  var DOMINIOS_IGNORADOS = ['wa.me', 'api.whatsapp.com', 'whatsapp.com', 'instagram.com', 'youtube.com'];
+  var CHAVE = 'is_utms';
+
+  // ===== LER / GUARDAR =====
+  function lerDaUrl() {
+    var busca = new URLSearchParams(window.location.search);
+    var achados = {};
+    PARAMETROS.forEach(function (p) {
+      var v = busca.get(p);
+      if (v) achados[p] = v;
+    });
+    return achados;
+  }
+
+  function salvar(dados) {
+    try {
+      localStorage.setItem(CHAVE, JSON.stringify({
+        dados: dados,
+        expira: Date.now() + DIAS_GUARDADOS * 86400000
+      }));
+    } catch (e) {}
+  }
+
+  function carregar() {
+    try {
+      var bruto = JSON.parse(localStorage.getItem(CHAVE) || 'null');
+      if (bruto && bruto.expira > Date.now()) return bruto.dados || {};
+      localStorage.removeItem(CHAVE);
+    } catch (e) {}
+    return {};
+  }
+
+  // Se a URL atual trouxe UTMs novas, elas substituem as antigas (último clique)
+  var daUrl = lerDaUrl();
+  var utms = Object.keys(daUrl).length ? daUrl : carregar();
+  if (Object.keys(daUrl).length) salvar(daUrl);
+  if (!Object.keys(utms).length) return; // nada para repassar
+
+  // ===== APLICAR NOS LINKS =====
+  function deveIgnorar(url) {
+    if (!/^https?:$/.test(url.protocol)) return true; // mailto:, tel:, javascript:
+    return DOMINIOS_IGNORADOS.some(function (d) {
+      return url.hostname === d || url.hostname.slice(-(d.length + 1)) === '.' + d;
+    });
+  }
+
+  function aplicarNoLink(a) {
+    var href = a.getAttribute('href');
+    if (!href || href.charAt(0) === '#') return;
+    var url;
+    try { url = new URL(href, window.location.href); } catch (e) { return; }
+    if (deveIgnorar(url)) return;
+
+    var mudou = false;
+    Object.keys(utms).forEach(function (p) {
+      if (!url.searchParams.has(p)) {
+        url.searchParams.set(p, utms[p]);
+        mudou = true;
+      }
+    });
+    if (mudou) a.setAttribute('href', url.toString());
+  }
+
+  function aplicarNosFormularios(raiz) {
+    Object.keys(utms).forEach(function (p) {
+      raiz.querySelectorAll('input[name="' + p + '"]').forEach(function (campo) {
+        if (!campo.value) campo.value = utms[p];
+      });
+    });
+  }
+
+  function aplicarTudo(raiz) {
+    raiz = raiz || document;
+    raiz.querySelectorAll('a[href]').forEach(aplicarNoLink);
+    aplicarNosFormularios(raiz);
+  }
+
+  // Ao carregar a página
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () { aplicarTudo(); });
+  } else {
+    aplicarTudo();
+  }
+
+  // Garantia extra: aplica no momento do clique (botões criados por JS)
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest && e.target.closest('a[href]');
+    if (a) aplicarNoLink(a);
+  }, true);
+
+  // Links/formulários adicionados depois (pop-ups, seções carregadas por JS)
+  if ('MutationObserver' in window) {
+    new MutationObserver(function (mudancas) {
+      mudancas.forEach(function (m) {
+        m.addedNodes.forEach(function (n) {
+          if (n.nodeType !== 1) return;
+          if (n.matches && n.matches('a[href]')) aplicarNoLink(n);
+          aplicarTudo(n);
+        });
+      });
+    }).observe(document.documentElement, { childList: true, subtree: true });
+  }
+})();
+</script>
 </body>
 </html>
